@@ -128,7 +128,7 @@ async def _download_media(tweet_id: str, media_list: list[dict]) -> list[MediaIt
             MediaItem(
                 index=idx,
                 media_type="video" if ext == "mp4" else "image",
-                thumbnail_url=f"/media/twitter/{tweet_id}/media_{idx}.jpg" if ext == "jpg" else None,
+                thumbnail_url=f"/media/twitter/{tweet_id}/media_{idx}.jpg" if ext == "jpg" else "",
                 video_url=f"/media/twitter/{tweet_id}/media_{idx}.mp4" if ext == "mp4" else None,
             )
         )
