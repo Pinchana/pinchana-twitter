@@ -78,6 +78,11 @@ def _cached_media_ready(metadata: dict) -> bool:
     if not isinstance(metadata, dict):
         return False
 
+    # Invalidate old cache entries that predate engagement stat fields
+    engagement_keys = ("like_count", "reply_count", "repost_count", "view_count", "username")
+    if not any(k in metadata for k in engagement_keys):
+        return False
+
     urls: list[str] = []
     for key in ("thumbnail_url", "video_url"):
         value = metadata.get(key)
