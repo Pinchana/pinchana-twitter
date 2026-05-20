@@ -392,13 +392,25 @@ class TwitterGraphQLScraper:
         entities_urls = (legacy.get("entities") or {}).get("urls") or []
         expanded_link = None
         for u in entities_urls:
+            url_short = u.get("url")
             expanded = u.get("expanded_url")
             if expanded:
-                expanded_link = expanded
-                break
+                if not expanded_link:
+                    expanded_link = expanded
+                if url_short and text:
+                    text = text.replace(url_short, expanded)
 
         views = result.get("views", {})
         media = self._parse_legacy_media(legacy)
+
+        # Strip t.co media links from text
+        media_entities = (legacy.get("extended_entities") or {}).get("media") or []
+        if not media_entities:
+            media_entities = (legacy.get("entities") or {}).get("media") or []
+        for m in media_entities:
+            m_url = m.get("url")
+            if m_url and text:
+                text = text.replace(m_url, "").strip()
 
         return {
             "tweet_id": str(result.get("rest_id") or legacy.get("id_str") or tweet_id),
