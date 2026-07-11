@@ -179,8 +179,7 @@ async def _scrape_tweet(tweet_id: str) -> TwitterScrapeResponse:
     return response
 
 
-@router.post("/scrape", response_model=TwitterScrapeResponse)
-async def process_scrape_request(request: ScrapeRequest):
+async def _process_scrape_request(request: ScrapeRequest):
     tweet_id = extract_tweet_id(str(request.url))
 
     if storage.is_cached(tweet_id):
@@ -202,6 +201,12 @@ async def process_scrape_request(request: ScrapeRequest):
     except Exception as e:
         logger.error("Scrape failed after retries: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/scrape", response_model=TwitterScrapeResponse)
+async def process_scrape_request(request: ScrapeRequest):
+    tweet_id = extract_tweet_id(str(request.url))
+    return await storage.singleflight(tweet_id, lambda: _process_scrape_request(request))
 
 
 @router.get("/media/{platform}/{post_id}/{filename:path}")
@@ -228,7 +233,7 @@ async def health_check():
     try:
         status = await gluetun.get_vpn_status()
         vpn_status = status.get("status", "").lower()
-        if vpn_status != "running":
+        if gluetun.enabled and vpn_status != "running":
             raise HTTPException(status_code=503, detail=f"VPN not running: {vpn_status}")
         return {"status": "healthy", "service": "twitter", "vpn": status}
     except HTTPException:
@@ -247,3 +252,8 @@ registry.register(
 
 app = FastAPI(title="Pinchana Twitter", version="0.1.0")
 app.include_router(router)
+
+
+@app.on_event("shutdown")
+async def close_storage_client():
+    await storage.close()
