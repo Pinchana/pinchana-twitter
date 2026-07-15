@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException
@@ -83,10 +84,15 @@ def _cached_media_ready(metadata: dict) -> bool:
     engagement_keys = ("like_count", "reply_count", "repost_count", "view_count", "username")
     if not any(k in metadata for k in engagement_keys):
         return False
+    if str(metadata.get("username") or "").strip().lower() in {"", "unknown"}:
+        return False
 
     urls: list[str] = []
-    for key in ("thumbnail_url", "video_url"):
-        value = metadata.get(key)
+    top_thumbnail = metadata.get("thumbnail_url")
+    top_video = metadata.get("video_url")
+    if top_video and not top_thumbnail:
+        return False
+    for value in (top_thumbnail, top_video):
         if value:
             urls.append(value)
 
@@ -95,6 +101,8 @@ def _cached_media_ready(metadata: dict) -> bool:
         for item in carousel:
             if not isinstance(item, dict):
                 continue
+            if item.get("video_url") and not item.get("thumbnail_url"):
+                return False
             for key in ("thumbnail_url", "video_url"):
                 value = item.get(key)
                 if value:
@@ -112,7 +120,7 @@ async def _download_media(tweet_id: str, media_list: list[dict]) -> list[MediaIt
     storage.prepare_post_dir(tweet_id)
 
     tasks = []
-    mapping: list[tuple[int, str]] = []
+    destinations: list[tuple[int, str, Path]] = []
 
     for idx, item in enumerate(media_list):
         media_url = item.get("url")
@@ -121,21 +129,56 @@ async def _download_media(tweet_id: str, media_list: list[dict]) -> list[MediaIt
         ext = "mp4" if item.get("type") == "video" else "jpg"
         dest = storage.base_path / tweet_id / f"media_{idx}.{ext}"
         tasks.append(storage.download(media_url, dest))
-        mapping.append((idx, ext))
+        destinations.append((idx, ext, dest))
+
+        preview_url = item.get("thumbnail") if ext == "mp4" else None
+        if preview_url:
+            preview_dest = storage.base_path / tweet_id / f"media_{idx}.jpg"
+            tasks.append(storage.download(preview_url, preview_dest))
+            destinations.append((idx, "jpg", preview_dest))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    for r in results:
-        if isinstance(r, Exception):
-            logger.error("Twitter media download error: %s", r)
+    failed_destinations: set[Path] = set()
+    for destination, result in zip(destinations, results):
+        if isinstance(result, Exception) or result is not True:
+            failed_destinations.add(destination[2])
+            logger.error(
+                "Twitter media download error index=%s type=%s: %s",
+                destination[0],
+                destination[1],
+                result,
+            )
 
     items: list[MediaItem] = []
-    for idx, ext in mapping:
+    for idx, item in enumerate(media_list):
+        is_video = item.get("type") == "video"
+        primary_ext = "mp4" if is_video else "jpg"
+        primary = storage.base_path / tweet_id / f"media_{idx}.{primary_ext}"
+        if (
+            primary in failed_destinations
+            or not primary.is_file()
+            or primary.stat().st_size == 0
+        ):
+            continue
+        preview = storage.base_path / tweet_id / f"media_{idx}.jpg"
         items.append(
             MediaItem(
                 index=idx,
-                media_type="video" if ext == "mp4" else "image",
-                thumbnail_url=f"/media/twitter/{tweet_id}/media_{idx}.jpg" if ext == "jpg" else "",
-                video_url=f"/media/twitter/{tweet_id}/media_{idx}.mp4" if ext == "mp4" else None,
+                media_type="video" if is_video else "image",
+                thumbnail_url=(
+                    f"/media/twitter/{tweet_id}/media_{idx}.jpg"
+                    if (
+                        preview not in failed_destinations
+                        and preview.is_file()
+                        and preview.stat().st_size > 0
+                    )
+                    else ""
+                ),
+                video_url=(
+                    f"/media/twitter/{tweet_id}/media_{idx}.mp4"
+                    if is_video
+                    else None
+                ),
             )
         )
     return items

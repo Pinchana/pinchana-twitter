@@ -1,0 +1,115 @@
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from pinchana_twitter import main
+from pinchana_twitter.scraper import TwitterGraphQLScraper
+
+
+def _payload(user: dict) -> dict:
+    return {
+        "data": {
+            "tweetResult": {
+                "result": {
+                    "__typename": "Tweet",
+                    "rest_id": "2077331427549421918",
+                    "core": {"user_results": {"result": user}},
+                    "legacy": {
+                        "id_str": "2077331427549421918",
+                        "full_text": "Post text https://t.co/media",
+                        "created_at": "Wed Jul 15 11:56:00 +0000 2026",
+                        "entities": {"urls": []},
+                        "extended_entities": {
+                            "media": [{
+                                "type": "video",
+                                "url": "https://t.co/media",
+                                "media_url_https": "https://pbs.twimg.com/preview.jpg",
+                                "original_info": {"width": 1920, "height": 1080},
+                                "video_info": {"variants": [{
+                                    "content_type": "video/mp4",
+                                    "bitrate": 2_000_000,
+                                    "url": "https://video.twimg.com/video.mp4",
+                                }]},
+                            }]
+                        },
+                    },
+                    "views": {"count": "123"},
+                }
+            }
+        }
+    }
+
+
+def test_current_graphql_user_core_identity_and_video_preview():
+    result = TwitterGraphQLScraper()._parse_graphql_tweet(
+        _payload({
+            "core": {"name": "Rick de Jager", "screen_name": "rdjgr"},
+            "legacy": {"description": "Security Researcher"},
+        }),
+        "2077331427549421918",
+    )
+
+    assert result["author_name"] == "Rick de Jager"
+    assert result["username"] == "rdjgr"
+    assert result["url"].startswith("https://x.com/rdjgr/status/")
+    assert result["media"][0]["thumbnail"] == "https://pbs.twimg.com/preview.jpg"
+
+
+def test_legacy_graphql_identity_remains_supported():
+    result = TwitterGraphQLScraper()._parse_graphql_tweet(
+        _payload({"legacy": {"name": "Legacy Name", "screen_name": "legacy"}}),
+        "2077331427549421918",
+    )
+
+    assert result["author_name"] == "Legacy Name"
+    assert result["username"] == "legacy"
+
+
+def test_cache_rejects_unknown_identity_and_video_without_preview(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "storage", SimpleNamespace(base_path=tmp_path))
+    post = tmp_path / "1"
+    post.mkdir()
+    (post / "media_0.mp4").write_bytes(b"video")
+
+    base = {
+        "username": "unknown",
+        "video_url": "/media/twitter/1/media_0.mp4",
+        "thumbnail_url": "",
+        "like_count": 1,
+    }
+    assert not main._cached_media_ready(base)
+
+    base["username"] = "rdjgr"
+    assert not main._cached_media_ready(base)
+
+    (post / "media_0.jpg").write_bytes(b"preview")
+    base["thumbnail_url"] = "/media/twitter/1/media_0.jpg"
+    assert main._cached_media_ready(base)
+
+
+@pytest.mark.asyncio
+async def test_video_download_keeps_video_and_preview(tmp_path, monkeypatch):
+    class FakeStorage:
+        base_path = tmp_path
+
+        def prepare_post_dir(self, tweet_id: str):
+            (self.base_path / tweet_id).mkdir(parents=True, exist_ok=True)
+
+        async def download(self, url: str, destination: Path):
+            destination.write_bytes(url.encode())
+            return True
+
+    monkeypatch.setattr(main, "storage", FakeStorage())
+
+    items = await main._download_media("1", [{
+        "type": "video",
+        "url": "https://video.twimg.com/video.mp4",
+        "thumbnail": "https://pbs.twimg.com/preview.jpg",
+    }])
+
+    assert len(items) == 1
+    assert items[0].video_url == "/media/twitter/1/media_0.mp4"
+    assert items[0].thumbnail_url == "/media/twitter/1/media_0.jpg"
+    assert (tmp_path / "1" / "media_0.mp4").is_file()
+    assert (tmp_path / "1" / "media_0.jpg").is_file()

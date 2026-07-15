@@ -67,8 +67,9 @@ class TwitterGraphQLScraper:
         "refs/heads/main/src/config/placeholder.json"
     )
 
-    # Known-good fallback query id for TweetResultByRestId (2026-05 observed working)
+    # Known-good fallback query ids for TweetResultByRestId, newest first.
     FALLBACK_QUERY_IDS = [
+        "tCVRZ3WCvoj0BVO7BKnL-Q",
         "zy39CwTyYhU-_0LP7dljjg",
         "7xflPyRiUxGVbJd4uWmbfg",
     ]
@@ -106,6 +107,19 @@ class TwitterGraphQLScraper:
         "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
         "responsive_web_graphql_timeline_navigation_enabled": True,
         "responsive_web_enhance_cards_enabled": False,
+        "payments_enabled": False,
+        "premium_content_api_read_enabled": False,
+        "profile_label_improvements_pcf_label_in_post_enabled": True,
+        "responsive_web_grok_analysis_button_from_backend": True,
+        "responsive_web_grok_analyze_button_fetch_trends_enabled": False,
+        "responsive_web_grok_analyze_post_followups_enabled": True,
+        "responsive_web_grok_community_note_auto_translation_is_enabled": False,
+        "responsive_web_grok_image_annotation_enabled": True,
+        "responsive_web_grok_imagine_annotation_enabled": True,
+        "responsive_web_grok_share_attachment_enabled": True,
+        "responsive_web_grok_show_grok_translated_post": False,
+        "responsive_web_jetfuel_frame": True,
+        "responsive_web_profile_redirect_enabled": False,
     }
 
     DEFAULT_FIELD_TOGGLES = {
@@ -385,8 +399,16 @@ class TwitterGraphQLScraper:
 
         user_result = result.get("core", {}).get("user_results", {}).get("result", {})
         user_legacy = user_result.get("legacy") or {}
+        user_core = user_result.get("core") or {}
 
-        username = user_legacy.get("screen_name") or "unknown"
+        # X moved identity fields from User.legacy to User.core in July 2026.
+        # Keep the legacy fallback for older responses and FxTwitter fixtures.
+        username = (
+            user_core.get("screen_name")
+            or user_legacy.get("screen_name")
+            or "unknown"
+        )
+        author_name = user_core.get("name") or user_legacy.get("name")
         text = legacy.get("full_text") or ""
 
         entities_urls = (legacy.get("entities") or {}).get("urls") or []
@@ -418,7 +440,7 @@ class TwitterGraphQLScraper:
             "text": text,
             "created_at": legacy.get("created_at"),
             "username": username,
-            "author_name": user_legacy.get("name"),
+            "author_name": author_name,
             "like_count": legacy.get("favorite_count"),
             "reply_count": legacy.get("reply_count"),
             "repost_count": legacy.get("retweet_count"),
