@@ -31,6 +31,7 @@ class TwitterScrapeResponse(ScrapeResponse):
     link: Optional[str] = None
     nsfw: bool = False
     source: Optional[str] = None
+    created_at: Optional[str] = None
 
 
 logging.basicConfig(level=logging.INFO)
@@ -173,6 +174,7 @@ async def _scrape_tweet(tweet_id: str) -> TwitterScrapeResponse:
         link=parsed.get("link"),
         nsfw=bool(parsed.get("nsfw")),
         source=parsed.get("source"),
+        created_at=(str(parsed["created_at"]) if parsed.get("created_at") is not None else None),
     )
 
     storage.save_metadata(tweet_id, response.model_dump())
