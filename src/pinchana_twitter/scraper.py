@@ -376,6 +376,7 @@ class TwitterGraphQLScraper:
                             "thumbnail": node.get("media_url_https") or node.get("media_url"),
                             "width": width,
                             "height": height,
+                            "looping": media_type == "animated_gif",
                         }
                     )
                 continue
@@ -474,6 +475,7 @@ class TwitterGraphQLScraper:
                             "thumbnail": m.get("thumbnail_url"),
                             "width": m.get("width"),
                             "height": m.get("height"),
+                            "looping": mtype == "gif",
                         }
                     )
             else:

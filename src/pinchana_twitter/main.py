@@ -33,6 +33,7 @@ class TwitterScrapeResponse(ScrapeResponse):
     nsfw: bool = False
     source: Optional[str] = None
     created_at: Optional[str] = None
+    looping: bool = False
 
 
 logging.basicConfig(level=logging.INFO)
@@ -86,6 +87,8 @@ def _cached_media_ready(metadata: dict) -> bool:
         return False
     if str(metadata.get("username") or "").strip().lower() in {"", "unknown"}:
         return False
+    if "looping" not in metadata:
+        return False
 
     urls: list[str] = []
     top_thumbnail = metadata.get("thumbnail_url")
@@ -101,6 +104,8 @@ def _cached_media_ready(metadata: dict) -> bool:
         for item in carousel:
             if not isinstance(item, dict):
                 continue
+            if item.get("video_url") and "looping" not in item:
+                return False
             if item.get("video_url") and not item.get("thumbnail_url"):
                 return False
             for key in ("thumbnail_url", "video_url"):
@@ -179,6 +184,7 @@ async def _download_media(tweet_id: str, media_list: list[dict]) -> list[MediaIt
                     if is_video
                     else None
                 ),
+                looping=bool(item.get("looping")),
             )
         )
     return items
@@ -193,11 +199,13 @@ async def _scrape_tweet(tweet_id: str) -> TwitterScrapeResponse:
         thumbnail_url = media_items[0].thumbnail_url or ""
         video_url = media_items[0].video_url
         carousel = media_items if len(media_items) > 1 else None
+        looping = bool(media_items[0].looping) if len(media_items) == 1 else False
     else:
         media_type = "text"
         thumbnail_url = ""
         video_url = None
         carousel = None
+        looping = False
 
     response = TwitterScrapeResponse(
         shortcode=tweet_id,
@@ -218,6 +226,7 @@ async def _scrape_tweet(tweet_id: str) -> TwitterScrapeResponse:
         nsfw=bool(parsed.get("nsfw")),
         source=parsed.get("source"),
         created_at=(str(parsed["created_at"]) if parsed.get("created_at") is not None else None),
+        looping=looping,
     )
 
     storage.save_metadata(tweet_id, response.model_dump())

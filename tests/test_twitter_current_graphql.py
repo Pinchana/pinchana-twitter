@@ -54,6 +54,17 @@ def test_current_graphql_user_core_identity_and_video_preview():
     assert result["username"] == "rdjgr"
     assert result["url"].startswith("https://x.com/rdjgr/status/")
     assert result["media"][0]["thumbnail"] == "https://pbs.twimg.com/preview.jpg"
+    assert result["media"][0]["looping"] is False
+
+
+def test_animated_gif_marker_survives_graphql_parsing():
+    payload = _payload({"legacy": {"name": "Loop Author", "screen_name": "loop"}})
+    payload["data"]["tweetResult"]["result"]["legacy"]["extended_entities"]["media"][0]["type"] = "animated_gif"
+
+    result = TwitterGraphQLScraper()._parse_graphql_tweet(payload, "2077331427549421918")
+
+    assert result["media"][0]["type"] == "video"
+    assert result["media"][0]["looping"] is True
 
 
 def test_legacy_graphql_identity_remains_supported():
@@ -77,6 +88,7 @@ def test_cache_rejects_unknown_identity_and_video_without_preview(tmp_path, monk
         "video_url": "/media/twitter/1/media_0.mp4",
         "thumbnail_url": "",
         "like_count": 1,
+        "looping": False,
     }
     assert not main._cached_media_ready(base)
 
@@ -106,10 +118,12 @@ async def test_video_download_keeps_video_and_preview(tmp_path, monkeypatch):
         "type": "video",
         "url": "https://video.twimg.com/video.mp4",
         "thumbnail": "https://pbs.twimg.com/preview.jpg",
+        "looping": True,
     }])
 
     assert len(items) == 1
     assert items[0].video_url == "/media/twitter/1/media_0.mp4"
     assert items[0].thumbnail_url == "/media/twitter/1/media_0.jpg"
+    assert items[0].looping is True
     assert (tmp_path / "1" / "media_0.mp4").is_file()
     assert (tmp_path / "1" / "media_0.jpg").is_file()
