@@ -1,16 +1,29 @@
-# pinchana-twitter
+# Pinchana Twitter/X
 
-Twitter/X scraper module for Pinchana.
+This FastAPI module extracts public posts from X/Twitter and supported fixup domains. It uses X GraphQL with guest-token and CSRF handling, rotates the Gluetun connection after relevant rate-limit responses, and can use the FxTwitter API as a metadata fallback.
 
-## Strategy
+## Result behavior
 
-1. **Primary:** X internal GraphQL (`TweetResultByRestId`) using guest token activation + CSRF (`ct0`) handling.
-2. **Resilience:** Automatic VPN IP rotation via Gluetun on rate limits (429/403).
-3. **Fallback:** `api.fxtwitter.com` for public tweet metadata when GraphQL is blocked.
-4. **Media:** Download media to local cache and expose via `/media/twitter/{tweet_id}/{file}`.
+- Images and videos are downloaded into `/media/twitter/{post_id}/...` within the shared cache.
+- Animated GIF-style posts are returned as video assets with `looping: true` in the gateway's API v1 response.
+- A client that requires an actual GIF must perform the conversion explicitly. Pinchana Web exposes this as the **Convert Twitter GIFs** setting.
 
 ## API
 
-- `POST /scrape` — scrape a tweet URL
-- `GET /media/twitter/{tweet_id}/{filename}` — serve cached media
-- `GET /health` — VPN status
+- `POST /scrape` accepts `{"url":"https://x.com/account/status/POST_ID"}`.
+- `GET /media/twitter/{post_id}/{filename}` serves cached media inside the trusted gateway network.
+- `GET /health` reports service and VPN readiness.
+
+External clients should use the gateway's authenticated `POST /v1/scrape` and `/media/...` routes.
+
+## Development
+
+```sh
+uv sync --frozen
+uv run uvicorn pinchana_twitter.main:app --host 0.0.0.0 --port 8089 --reload
+```
+
+```sh
+# Run from the parent pinchana-api directory.
+docker build --file pinchana-twitter/Dockerfile --tag pinchana-twitter:local .
+```
