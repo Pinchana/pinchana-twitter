@@ -576,7 +576,7 @@ wheels = [
 
 [[package]]
 name = "pinchana-core"
-version = "0.2b0"
+version = "26.8.1"
 source = { directory = "../pinchana-core" }
 dependencies = [
     { name = "aiohttp" },
@@ -605,7 +605,7 @@ requires-dist = [
 
 [[package]]
 name = "pinchana-twitter"
-version = "0.2b0"
+version = "26.8.1"
 source = { editable = "." }
 dependencies = [
     { name = "curl-cffi" },
