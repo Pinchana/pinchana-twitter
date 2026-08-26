@@ -396,7 +396,10 @@ class TwitterGraphQLScraper:
 
         legacy = result.get("legacy") or {}
         if not legacy:
-            raise NotFoundError(f"Tweet {tweet_id} missing legacy payload")
+            # A present Tweet object with an unexpected schema is not proof that
+            # the tweet is gone. Treat it as a parser failure so scrape_tweet()
+            # can continue to the FxTwitter fallback instead of returning 404.
+            raise ScraperError(f"Tweet {tweet_id} missing legacy payload")
 
         user_result = result.get("core", {}).get("user_results", {}).get("result", {})
         user_legacy = user_result.get("legacy") or {}
