@@ -385,6 +385,15 @@ class TwitterGraphQLScraper:
 
     def _parse_graphql_tweet(self, payload: dict, tweet_id: str) -> dict:
         result = payload.get("data", {}).get("tweetResult", {}).get("result", {})
+        return self._parse_graphql_result(result, tweet_id, include_quote=True)
+
+    def _parse_graphql_result(
+        self,
+        result: dict,
+        tweet_id: str,
+        *,
+        include_quote: bool,
+    ) -> dict:
         result = self._unwrap_tweet_result(result)
 
         if not result:
@@ -413,9 +422,18 @@ class TwitterGraphQLScraper:
             or "unknown"
         )
         author_name = user_core.get("name") or user_legacy.get("name")
-        text = legacy.get("full_text") or ""
+        note_tweet_result = (
+            ((result.get("note_tweet") or {}).get("note_tweet_results") or {}).get("result")
+            or {}
+        )
+        # For long-form posts, legacy.full_text is only a preview ending in a
+        # t.co continuation/media link. The Note Tweet text contains the whole
+        # post (including the preview), so it must replace rather than be
+        # appended to the legacy value.
+        text = note_tweet_result.get("text") or legacy.get("full_text") or ""
 
-        entities_urls = (legacy.get("entities") or {}).get("urls") or []
+        text_entities = note_tweet_result.get("entity_set") or legacy.get("entities") or {}
+        entities_urls = text_entities.get("urls") or []
         expanded_link = None
         for u in entities_urls:
             url_short = u.get("url")
@@ -438,7 +456,7 @@ class TwitterGraphQLScraper:
             if m_url and text:
                 text = text.replace(m_url, "").strip()
 
-        return {
+        parsed = {
             "tweet_id": str(result.get("rest_id") or legacy.get("id_str") or tweet_id),
             "url": f"https://x.com/{username}/status/{result.get('rest_id') or tweet_id}",
             "text": text,
@@ -455,6 +473,20 @@ class TwitterGraphQLScraper:
             "media": media,
             "source": "graphql",
         }
+        if include_quote:
+            quoted_result = (result.get("quoted_status_result") or {}).get("result")
+            quote = None
+            if isinstance(quoted_result, dict) and quoted_result:
+                try:
+                    quote = self._parse_graphql_result(
+                        quoted_result,
+                        str(legacy.get("quoted_status_id_str") or "quote"),
+                        include_quote=False,
+                    )
+                except (NotFoundError, ScraperError) as exc:
+                    logger.info("Quoted tweet is unavailable: %s", exc)
+            parsed["quote"] = quote
+        return parsed
 
     @classmethod
     def _parse_fxtwitter_media(cls, tweet_obj: dict) -> list[dict]:
@@ -501,10 +533,20 @@ class TwitterGraphQLScraper:
         if not tweet:
             raise NotFoundError(f"Tweet {tweet_id} not found")
 
+        return self._parse_fxtwitter_object(tweet, tweet_id, include_quote=True)
+
+    def _parse_fxtwitter_object(
+        self,
+        tweet: dict,
+        tweet_id: str,
+        *,
+        include_quote: bool,
+    ) -> dict:
+
         author = tweet.get("author") or {}
         username = author.get("screen_name") or author.get("name") or "unknown"
 
-        return {
+        parsed = {
             "tweet_id": str(tweet.get("id") or tweet_id),
             "url": tweet.get("url") or f"https://x.com/{username}/status/{tweet_id}",
             "text": tweet.get("text") or tweet.get("raw_text") or "",
@@ -521,3 +563,15 @@ class TwitterGraphQLScraper:
             "media": self._parse_fxtwitter_media(tweet),
             "source": "fxtwitter",
         }
+        if include_quote:
+            quoted = tweet.get("quote")
+            parsed["quote"] = (
+                self._parse_fxtwitter_object(
+                    quoted,
+                    str(quoted.get("id") or "quote"),
+                    include_quote=False,
+                )
+                if isinstance(quoted, dict) and quoted
+                else None
+            )
+        return parsed

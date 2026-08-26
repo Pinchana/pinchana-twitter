@@ -67,6 +67,42 @@ def test_animated_gif_marker_survives_graphql_parsing():
     assert result["media"][0]["looping"] is True
 
 
+def test_note_tweet_text_replaces_truncated_legacy_preview():
+    payload = _payload({"legacy": {"name": "Long Author", "screen_name": "long"}})
+    result = payload["data"]["tweetResult"]["result"]
+    result["legacy"]["full_text"] = "The beginning of a long post https://t.co/media"
+    result["note_tweet"] = {
+        "is_expandable": True,
+        "note_tweet_results": {
+            "result": {
+                "text": "The beginning of a long post and its complete ending.",
+                "entity_set": {"urls": []},
+            }
+        },
+    }
+
+    parsed = TwitterGraphQLScraper()._parse_graphql_tweet(
+        payload,
+        "2077331427549421918",
+    )
+
+    assert parsed["text"] == "The beginning of a long post and its complete ending."
+
+
+def test_legacy_text_remains_fallback_for_regular_post():
+    payload = _payload({"legacy": {"name": "Short Author", "screen_name": "short"}})
+    payload["data"]["tweetResult"]["result"]["legacy"]["full_text"] = (
+        "It's over guys https://t.co/media"
+    )
+
+    parsed = TwitterGraphQLScraper()._parse_graphql_tweet(
+        payload,
+        "2077331427549421918",
+    )
+
+    assert parsed["text"] == "It's over guys"
+
+
 def test_legacy_graphql_identity_remains_supported():
     result = TwitterGraphQLScraper()._parse_graphql_tweet(
         _payload({"legacy": {"name": "Legacy Name", "screen_name": "legacy"}}),
@@ -75,6 +111,27 @@ def test_legacy_graphql_identity_remains_supported():
 
     assert result["author_name"] == "Legacy Name"
     assert result["username"] == "legacy"
+
+
+def test_quote_tweet_is_parsed_once_without_following_a_quote_chain():
+    payload = _payload({"core": {"name": "Main", "screen_name": "main"}})
+    result = payload["data"]["tweetResult"]["result"]
+    quoted = _payload({"core": {"name": "Quoted", "screen_name": "quoted"}})["data"]["tweetResult"]["result"]
+    quoted["rest_id"] = "2092341126845931776"
+    quoted["legacy"]["id_str"] = "2092341126845931776"
+    quoted["legacy"]["full_text"] = "quoted text"
+    quoted["legacy"]["extended_entities"] = {"media": []}
+    quoted["quoted_status_result"] = {"result": result}
+    result["quoted_status_result"] = {"result": quoted}
+
+    parsed = TwitterGraphQLScraper()._parse_graphql_tweet(
+        payload,
+        "2077331427549421918",
+    )
+
+    assert parsed["quote"]["tweet_id"] == "2092341126845931776"
+    assert parsed["quote"]["text"] == "quoted text"
+    assert "quote" not in parsed["quote"]
 
 
 @pytest.mark.asyncio
@@ -124,12 +181,16 @@ def test_cache_rejects_unknown_identity_and_video_without_preview(tmp_path, monk
     (post / "media_0.mp4").write_bytes(b"video")
 
     base = {
+        "_cache_version": main.TWITTER_CACHE_VERSION,
         "username": "unknown",
         "video_url": "/media/twitter/1/media_0.mp4",
         "thumbnail_url": "",
         "like_count": 1,
         "looping": False,
     }
+    stale_base = dict(base)
+    stale_base.pop("_cache_version")
+    assert not main._cached_media_ready(stale_base)
     assert not main._cached_media_ready(base)
 
     base["username"] = "rdjgr"
