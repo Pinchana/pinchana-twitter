@@ -45,6 +45,7 @@ def test_current_graphql_user_core_identity_and_video_preview():
     result = TwitterGraphQLScraper()._parse_graphql_tweet(
         _payload({
             "core": {"name": "Rick de Jager", "screen_name": "rdjgr"},
+            "avatar": {"image_url": "https://pbs.twimg.com/profile_images/avatar.jpg"},
             "legacy": {"description": "Security Researcher"},
         }),
         "2077331427549421918",
@@ -52,6 +53,7 @@ def test_current_graphql_user_core_identity_and_video_preview():
 
     assert result["author_name"] == "Rick de Jager"
     assert result["username"] == "rdjgr"
+    assert result["avatar_url"] == "https://pbs.twimg.com/profile_images/avatar.jpg"
     assert result["url"].startswith("https://x.com/rdjgr/status/")
     assert result["media"][0]["thumbnail"] == "https://pbs.twimg.com/preview.jpg"
     assert result["media"][0]["looping"] is False

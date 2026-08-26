@@ -26,6 +26,7 @@ class TwitterScrapeResponse(ScrapeResponse):
 
     username: Optional[str] = None
     author_name: Optional[str] = None
+    avatar_url: Optional[str] = None
     like_count: Optional[int] = None
     reply_count: Optional[int] = None
     repost_count: Optional[int] = None
@@ -52,7 +53,7 @@ storage = MediaStorage(
 
 # Increment when cached response semantics change. Metadata written before
 # Note Tweet support may contain a permanently truncated caption.
-TWITTER_CACHE_VERSION = 3
+TWITTER_CACHE_VERSION = 4
 
 
 class _InspectionCache:
@@ -302,6 +303,7 @@ async def _response_from_parsed(
         carousel=carousel,
         username=parsed.get("username"),
         author_name=parsed.get("author_name"),
+        avatar_url=parsed.get("avatar_url"),
         like_count=parsed.get("like_count"),
         reply_count=parsed.get("reply_count"),
         repost_count=parsed.get("repost_count"),

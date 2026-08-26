@@ -422,6 +422,11 @@ class TwitterGraphQLScraper:
             or "unknown"
         )
         author_name = user_core.get("name") or user_legacy.get("name")
+        avatar_url = (
+            (user_result.get("avatar") or {}).get("image_url")
+            or user_legacy.get("profile_image_url_https")
+            or user_legacy.get("profile_image_url")
+        )
         note_tweet_result = (
             ((result.get("note_tweet") or {}).get("note_tweet_results") or {}).get("result")
             or {}
@@ -463,6 +468,7 @@ class TwitterGraphQLScraper:
             "created_at": legacy.get("created_at"),
             "username": username,
             "author_name": author_name,
+            "avatar_url": avatar_url,
             "like_count": legacy.get("favorite_count"),
             "reply_count": legacy.get("reply_count"),
             "repost_count": legacy.get("retweet_count"),
@@ -553,6 +559,7 @@ class TwitterGraphQLScraper:
             "created_at": tweet.get("created_at") or tweet.get("created_timestamp"),
             "username": username,
             "author_name": author.get("name"),
+            "avatar_url": author.get("avatar_url") or author.get("avatar"),
             "like_count": tweet.get("likes"),
             "reply_count": tweet.get("replies"),
             "repost_count": tweet.get("retweets"),
