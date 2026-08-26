@@ -230,3 +230,14 @@ async def test_video_download_keeps_video_and_preview(tmp_path, monkeypatch):
     assert items[0].looping is True
     assert (tmp_path / "1" / "media_0.mp4").is_file()
     assert (tmp_path / "1" / "media_0.jpg").is_file()
+
+    quoted = await main._download_media(
+        "1",
+        [{"type": "image", "url": "https://pbs.twimg.com/quoted.jpg"}],
+        filename_prefix="quote_",
+    )
+
+    assert quoted[0].thumbnail_url == "/media/twitter/1/quote_media_0.jpg"
+    assert (tmp_path / "1" / "media_0.mp4").is_file()
+    assert (tmp_path / "1" / "media_0.jpg").is_file()
+    assert (tmp_path / "1" / "quote_media_0.jpg").is_file()

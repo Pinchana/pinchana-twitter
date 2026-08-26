@@ -174,7 +174,10 @@ async def _download_media(
     *,
     filename_prefix: str = "",
 ) -> list[MediaItem]:
-    storage.prepare_post_dir(tweet_id)
+    # The main post and its one-level quote share this directory. Preparing it
+    # here would delete media downloaded by the first pass because metadata is
+    # intentionally saved only after both passes complete.
+    (storage.base_path / tweet_id).mkdir(parents=True, exist_ok=True)
 
     tasks = []
     destinations: list[tuple[int, str, Path]] = []
@@ -320,6 +323,7 @@ async def _response_from_parsed(
 
 async def _scrape_tweet(tweet_id: str) -> TwitterScrapeResponse:
     parsed = await _parsed_tweet(tweet_id)
+    storage.prepare_post_dir(tweet_id)
     response = await _response_from_parsed(tweet_id, parsed, download_media=True)
 
     metadata = response.model_dump()
