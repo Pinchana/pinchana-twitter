@@ -77,6 +77,46 @@ def test_legacy_graphql_identity_remains_supported():
     assert result["username"] == "legacy"
 
 
+@pytest.mark.asyncio
+async def test_missing_legacy_graphql_payload_falls_back(monkeypatch):
+    scraper = TwitterGraphQLScraper()
+    tweet_id = "2092342786641310204"
+
+    async def fake_graphql_request(_: str) -> dict:
+        return {
+            "data": {
+                "tweetResult": {
+                    "result": {
+                        "__typename": "Tweet",
+                        "rest_id": tweet_id,
+                    }
+                }
+            }
+        }
+
+    async def fake_fxtwitter_request(_: str) -> dict:
+        return {
+            "tweet": {
+                "id": tweet_id,
+                "text": "fallback text",
+                "author": {
+                    "name": "Skyex Summers",
+                    "screen_name": "SkyexSummers",
+                },
+                "media": {"all": []},
+            }
+        }
+
+    monkeypatch.setattr(scraper, "_graphql_tweet_request", fake_graphql_request)
+    monkeypatch.setattr(scraper, "_fxtwitter_request", fake_fxtwitter_request)
+
+    result = await scraper.scrape_tweet(tweet_id)
+
+    assert result["source"] == "fxtwitter"
+    assert result["tweet_id"] == tweet_id
+    assert result["username"] == "SkyexSummers"
+
+
 def test_cache_rejects_unknown_identity_and_video_without_preview(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "storage", SimpleNamespace(base_path=tmp_path))
     post = tmp_path / "1"
