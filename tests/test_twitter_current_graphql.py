@@ -241,3 +241,22 @@ async def test_video_download_keeps_video_and_preview(tmp_path, monkeypatch):
     assert (tmp_path / "1" / "media_0.mp4").is_file()
     assert (tmp_path / "1" / "media_0.jpg").is_file()
     assert (tmp_path / "1" / "quote_media_0.jpg").is_file()
+
+
+@pytest.mark.asyncio
+async def test_incomplete_media_download_is_not_accepted(monkeypatch):
+    async def incomplete_download(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(main, "_download_media", incomplete_download)
+
+    with pytest.raises(main.MediaDownloadError):
+        await main._response_from_parsed(
+            "1",
+            {
+                "tweet_id": "1",
+                "username": "pinchana",
+                "media": [{"type": "image", "url": "https://cdn.example/image.jpg"}],
+            },
+            download_media=True,
+        )
