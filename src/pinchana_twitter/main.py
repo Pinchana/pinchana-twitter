@@ -53,7 +53,11 @@ storage = MediaStorage(
 
 # Increment when cached response semantics change. Metadata written before
 # Note Tweet support may contain a permanently truncated caption.
-TWITTER_CACHE_VERSION = 4
+TWITTER_CACHE_VERSION = 5
+
+
+class MediaDownloadError(RuntimeError):
+    pass
 
 
 class _InspectionCache:
@@ -136,7 +140,7 @@ def _cached_media_ready(metadata: dict) -> bool:
 
     for url in urls:
         path = _media_url_to_path(url)
-        if not path or not path.exists():
+        if not path or not path.is_file() or path.stat().st_size == 0:
             return False
 
     return True
@@ -269,6 +273,11 @@ async def _response_from_parsed(
         if download_media
         else []
     )
+    expected_media = [item for item in (parsed.get("media") or []) if item.get("url")]
+    if download_media and len(media_items) != len(expected_media):
+        raise MediaDownloadError(
+            f"downloaded {len(media_items)} of {len(expected_media)} Twitter media items"
+        )
 
     if media_items:
         media_type = "video" if any(m.media_type == "video" for m in media_items) else "image"
@@ -356,6 +365,11 @@ async def _process_scrape_request(request: ScrapeRequest):
         raise HTTPException(status_code=404, detail=str(e))
     except RateLimitError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except MediaDownloadError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "media_download_failed", "message": str(e)},
+        ) from e
     except Exception as e:
         logger.error("Scrape failed after retries: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
