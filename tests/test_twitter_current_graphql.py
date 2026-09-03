@@ -2,9 +2,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from curl_cffi.requests.errors import RequestsError
+from fastapi import HTTPException
+from pinchana_core.models import ScrapeRequest
 
 from pinchana_twitter import main
-from pinchana_twitter.scraper import TwitterGraphQLScraper
+from pinchana_twitter.scraper import (
+    RateLimitError,
+    TransientNetworkError,
+    TwitterGraphQLScraper,
+)
 
 
 def _payload(user: dict) -> dict:
@@ -57,6 +64,10 @@ def test_current_graphql_user_core_identity_and_video_preview():
     assert result["url"].startswith("https://x.com/rdjgr/status/")
     assert result["media"][0]["thumbnail"] == "https://pbs.twimg.com/preview.jpg"
     assert result["media"][0]["looping"] is False
+
+
+def test_retry_exhaustion_reraises_typed_error():
+    assert TwitterGraphQLScraper.scrape_tweet.retry.reraise is True
 
 
 def test_animated_gif_marker_survives_graphql_parsing():
@@ -260,3 +271,47 @@ async def test_incomplete_media_download_is_not_accepted(monkeypatch):
             },
             download_media=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_guest_activation_dns_timeout_is_retryable():
+    class FailingSession:
+        async def post(self, *_args, **_kwargs):
+            raise RequestsError(
+                "Resolving timed out after 15000 milliseconds",
+                code=28,
+            )
+
+    with pytest.raises(TransientNetworkError, match="Resolving timed out"):
+        await TwitterGraphQLScraper()._activate_guest_token(FailingSession())
+
+
+@pytest.mark.asyncio
+async def test_guest_activation_rate_limit_is_not_swallowed():
+    class RateLimitedResponse:
+        status_code = 429
+
+    class RateLimitedSession:
+        async def post(self, *_args, **_kwargs):
+            return RateLimitedResponse()
+
+    with pytest.raises(RateLimitError):
+        await TwitterGraphQLScraper()._activate_guest_token(RateLimitedSession())
+
+
+@pytest.mark.asyncio
+async def test_transient_network_failure_maps_to_retryable_503(monkeypatch):
+    monkeypatch.setattr(main.storage, "is_cached", lambda _tweet_id: False)
+
+    async def failed_scrape(_tweet_id: str):
+        raise TransientNetworkError("DNS resolution failed")
+
+    monkeypatch.setattr(main, "_scrape_tweet", failed_scrape)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await main._process_scrape_request(
+            ScrapeRequest(url="https://x.com/pinchana/status/2095262892224328187")
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["code"] == "upstream_unavailable"

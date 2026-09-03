@@ -8,6 +8,7 @@ import urllib.parse
 from typing import Any, Optional
 
 from curl_cffi.requests import AsyncSession
+from curl_cffi.requests.errors import RequestsError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from pinchana_core.vpn import GluetunController, VpnRotationError
@@ -23,6 +24,10 @@ class RateLimitError(ScraperError):
     pass
 
 
+class TransientNetworkError(ScraperError):
+    """Retryable DNS, connection, or timeout failure."""
+
+
 class NotFoundError(ScraperError):
     pass
 
@@ -32,13 +37,19 @@ gluetun = GluetunController()
 
 async def trigger_rotation(retry_state):
     """Trigger VPN IP rotation before each retry."""
-    logger.warning(f"Retry attempt {retry_state.attempt_number}. Rotating VPN IP...")
+    failure = retry_state.outcome.exception() if retry_state.outcome else None
+    logger.warning(
+        "Retry attempt %s after %s. Reconnecting VPN...",
+        retry_state.attempt_number,
+        type(failure).__name__ if failure else "upstream failure",
+    )
     try:
-        await gluetun.rotate_ip()
+        await gluetun.rotate_ip(
+            wait_for_cooldown=True,
+            reason=type(failure).__name__ if failure else "Twitter upstream failure",
+        )
     except VpnRotationError as e:
         logger.warning(f"VPN rotation failed: {e}")
-        # Re-raise as RateLimitError so tenacity continues retrying with backoff
-        raise RateLimitError(str(e))
 
 
 class TwitterGraphQLScraper:
@@ -136,8 +147,9 @@ class TwitterGraphQLScraper:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=1.5, min=4, max=30),
-        retry=retry_if_exception_type(RateLimitError),
+        retry=retry_if_exception_type((RateLimitError, TransientNetworkError)),
         before_sleep=trigger_rotation,
+        reraise=True,
     )
     async def scrape_tweet(self, tweet_id: str) -> dict:
         """Scrape a public tweet by numeric rest_id."""
@@ -151,8 +163,12 @@ class TwitterGraphQLScraper:
             logger.warning("GraphQL path failed for %s: %s", tweet_id, e)
 
         # Fallback: FxTwitter API
-        raw = await self._fxtwitter_request(tweet_id)
-        return self._parse_fxtwitter_tweet(raw, tweet_id)
+        try:
+            raw = await self._fxtwitter_request(tweet_id)
+            return self._parse_fxtwitter_tweet(raw, tweet_id)
+        except Exception as e:
+            logger.warning("FxTwitter fallback failed for %s: %s", tweet_id, e)
+            raise
 
     # ------------------------------------------------------------------
     # GraphQL request flow
@@ -179,10 +195,20 @@ class TwitterGraphQLScraper:
                 guest_token = data.get("guest_token")
                 if guest_token:
                     return str(guest_token)
+            except RateLimitError:
+                raise
+            except RequestsError as e:
+                last_error = str(e)
             except Exception as e:
                 last_error = str(e)
 
-        raise ScraperError(f"Failed to activate guest token: {last_error}")
+        message = f"Failed to activate guest token: {last_error}"
+        if isinstance(last_error, str) and any(
+            marker in last_error.lower()
+            for marker in ("resolve", "timed out", "timeout", "connect")
+        ):
+            raise TransientNetworkError(message)
+        raise ScraperError(message)
 
     async def _load_openapi_query_config(self, session: AsyncSession) -> None:
         if self._query_id:
@@ -285,6 +311,10 @@ class TwitterGraphQLScraper:
                     return data
                 except RateLimitError:
                     raise
+                except RequestsError as e:
+                    raise TransientNetworkError(
+                        f"Twitter GraphQL network request failed: {e}"
+                    ) from e
                 except Exception as e:
                     last_error = str(e)
 
@@ -297,9 +327,18 @@ class TwitterGraphQLScraper:
     async def _fxtwitter_request(self, tweet_id: str) -> dict:
         url = f"https://api.fxtwitter.com/status/{tweet_id}"
         async with AsyncSession(impersonate="chrome124") as session:
-            resp = await session.get(url, timeout=20)
+            try:
+                resp = await session.get(url, timeout=20)
+            except RequestsError as e:
+                raise TransientNetworkError(
+                    f"FxTwitter network request failed: {e}"
+                ) from e
             if resp.status_code == 429:
                 raise RateLimitError("FxTwitter fallback rate-limited")
+            if resp.status_code >= 500:
+                raise TransientNetworkError(
+                    f"FxTwitter fallback unavailable: HTTP {resp.status_code}"
+                )
             if resp.status_code >= 400:
                 raise NotFoundError(f"Fallback tweet not found: HTTP {resp.status_code}")
             data = resp.json()

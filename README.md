@@ -1,6 +1,6 @@
 # Pinchana Twitter/X
 
-This FastAPI module extracts public posts from X/Twitter and supported fixup domains. It uses X GraphQL with guest-token and CSRF handling, rotates the Gluetun connection after relevant rate-limit responses, and can use the FxTwitter API as a metadata fallback.
+This FastAPI module extracts public posts from X/Twitter and supported fixup domains. It uses X GraphQL with guest-token and CSRF handling, and can use the FxTwitter API as a metadata fallback. Confirmed rate limits and repeated DNS/connectivity failures trigger a bounded retry with Gluetun recovery; exhausted transient failures remain typed `503` responses.
 
 ## Result behavior
 

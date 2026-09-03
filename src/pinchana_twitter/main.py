@@ -18,7 +18,13 @@ from pinchana_core.plugins import ScraperPlugin, registry
 from pinchana_core.storage import MediaStorage
 from pinchana_core.vpn import GluetunController, VpnRotationError
 
-from .scraper import NotFoundError, RateLimitError, ScraperError, TwitterGraphQLScraper
+from .scraper import (
+    NotFoundError,
+    RateLimitError,
+    ScraperError,
+    TransientNetworkError,
+    TwitterGraphQLScraper,
+)
 
 
 class TwitterScrapeResponse(ScrapeResponse):
@@ -356,8 +362,6 @@ async def _process_scrape_request(request: ScrapeRequest):
             return TwitterScrapeResponse(**cached)
         logger.info("Cache invalid for tweet %s, re-scraping", tweet_id)
 
-    last_error: Exception | None = None
-
     try:
         # The scraper now has @retry with automatic VPN rotation
         return await _scrape_tweet(tweet_id)
@@ -365,6 +369,11 @@ async def _process_scrape_request(request: ScrapeRequest):
         raise HTTPException(status_code=404, detail=str(e))
     except RateLimitError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except TransientNetworkError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "upstream_unavailable", "message": str(e)},
+        ) from e
     except MediaDownloadError as e:
         raise HTTPException(
             status_code=503,
