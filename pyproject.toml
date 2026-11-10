@@ -6,22 +6,22 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "pinchana-core",
-    "curl-cffi>=0.16.3",
-    "fastapi>=0.143.1",
-    "pydantic>=2.14.1",
+    "curl-cffi>=0.17.0",
+    "fastapi>=0.162.2",
+    "pydantic>=2.14.3",
     "tenacity>=9.2.1",
     "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
 ]
 
 [tool.uv.sources]
 pinchana-core = { path = "../pinchana-core" }
 
 [build-system]
-requires = ["uv_build>=0.13.1,<0.14.0"]
+requires = ["uv_build>=0.13.7,<0.14.0"]
 build-backend = "uv_build"
